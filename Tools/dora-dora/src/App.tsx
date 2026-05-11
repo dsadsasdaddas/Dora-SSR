@@ -614,9 +614,10 @@ export default function PersistentDrawerLeft() {
 	}| null>(null);
 
 	const [openFilter, setOpenFilter] = useState(false);
-	const [leftDockTab, setLeftDockTab] = useState<"explorer" | "search">("explorer");
+	const [leftDockTab, setLeftDockTab] = useState<"explorer" | "search" | "tools">("explorer");
 	const [filterOptions, setFilterOptions] = useState<FilterOption[] | null>(null);
 	const [openLLMConfig, setOpenLLMConfig] = useState(false);
+	const [toolEntries, setToolEntries] = useState<Service.EntryLaunchInfo[]>([]);
 	const {width: drawerWidth, enableResize, isResizing} = useResize({minWidth: 150, defaultWidth: Info.drawerWidth});
 	const [winSize, setWinSize] = useState({
 		width: window.innerWidth,
@@ -675,6 +676,17 @@ export default function PersistentDrawerLeft() {
 		});
 	}, [addAlert, t]);
 
+	const loadEntries = useCallback(() => {
+		return Service.entryList().then((res) => {
+			if (res.success) {
+				setToolEntries(res.tools ?? []);
+			}
+			return res;
+		}).catch(() => {
+			return null;
+		});
+	}, []);
+
 	useEffect(() => {
 		if (Info.version === undefined) {
 			addAlert(t("alert.getInfo"), "error");
@@ -731,6 +743,7 @@ export default function PersistentDrawerLeft() {
 			Service.read({path: "lua.d.ts"}),
 			Service.read({path: "Dora.d.ts"}),
 			loadAssets(),
+			loadEntries(),
 		]).then(([es6, lua, dora, res]) => {
 			if (es6.success) {
 				monacoTypescript.typescriptDefaults.addExtraLib(es6.content, "es6-subset.d.ts");
@@ -745,7 +758,20 @@ export default function PersistentDrawerLeft() {
 				setExpandedKeys([res.key]);
 			}
 			Service.editingInfo().then(res => {
-				if (res.success && res.editingInfo) {
+				const fileParam = new URLSearchParams(window.location.search).get("file");
+				if (fileParam !== null && fileParam !== "") {
+					const normalizedFile = decodeURIComponent(fileParam);
+					const editingInfo: Service.EditingInfo = {
+						index: 0,
+						files: [{
+							key: normalizedFile,
+							title: path.basename(normalizedFile),
+							folder: false,
+							position: {lineNumber: 1, column: 1},
+						}],
+					};
+					openEditingInfoFiles(editingInfo);
+				} else if (res.success && res.editingInfo) {
 					const editingInfo: Service.EditingInfo = JSON.parse(res.editingInfo);
 					openEditingInfoFiles(editingInfo);
 				}
@@ -1283,7 +1309,7 @@ export default function PersistentDrawerLeft() {
 		});
 		}, [addAlert, openFile, switchTab, t]);
 
-	const openFileInTab = useCallback((key: string, title: string, folder: boolean, position?: monaco.IPosition, readOnly? :boolean) => {
+	const openFileInTab = useCallback((key: string, title: string, folder: boolean, position?: monaco.IPosition, readOnly?: boolean, workspaceView?: "agent" | "upload") => {
 		let index: number | null = null;
 		const file = files.find((file, i) => {
 			if (path.relative(file.key, key) === "") {
@@ -1295,6 +1321,7 @@ export default function PersistentDrawerLeft() {
 		if (index === null) {
 			openFile(key, title, folder).then((newFile) => {
 				newFile.readOnly = readOnly;
+				newFile.workspaceView = workspaceView;
 				if (position !== undefined) {
 					newFile.position = position;
 					const ext = path.extname(title).toLowerCase();
@@ -1312,6 +1339,10 @@ export default function PersistentDrawerLeft() {
 			}).catch(() => {});
 		} else {
 			switchTab(index, file);
+			if (file && workspaceView !== undefined) {
+				file.workspaceView = workspaceView;
+				setFiles([...files]);
+			}
 			if (file && position) {
 				file.position = position;
 				const ext = path.extname(title).toLowerCase();
@@ -1323,6 +1354,28 @@ export default function PersistentDrawerLeft() {
 			}
 		}
 	}, [switchTab, files, openFile]);
+
+	useEffect(() => {
+		const handleOpenFile = async (message: Service.OpenFileMessage) => {
+			if (message.file === "") return;
+			if (message.folder === true && message.workspaceView === "agent") {
+				const opened = await openAgentSessionTab(message.file, true, { silentWhenNotFound: true });
+				if (opened) return;
+			}
+			openFileInTab(
+				message.file,
+				message.title ?? path.basename(message.file),
+				message.folder === true,
+				message.position ?? {lineNumber: 1, column: 1},
+				message.readOnly === true,
+				message.workspaceView,
+			);
+		};
+		Service.addOpenFileListener(handleOpenFile);
+		return () => {
+			Service.removeOpenFileListener(handleOpenFile);
+		};
+	}, [openAgentSessionTab, openFileInTab]);
 
 	useEffect(() => {
 		const applyUpdateFileBatch = (events: UpdateFileEvent[]) => {
@@ -1647,9 +1700,34 @@ export default function PersistentDrawerLeft() {
 				})
 				return;
 			}
-		}
-		addAlert(t("alert.runFailed", {title}), "info");
+	}
+	addAlert(t("alert.runFailed", {title}), "info");
 	}, [addAlert, files, tabIndex, t, selectedNode, isEditorActioning]);
+
+	const onLaunchEntry = useCallback((entry: Service.EntryLaunchInfo) => {
+		Service.run({file: entry.file, asProj: entry.asProj}).then((res) => {
+			if (res.success) {
+				addAlert(t("alert.run", {title: res.target ?? entry.name}), "success");
+				if (entry.openLog) {
+					setOpenLog({
+						title: res.target ?? entry.name,
+						stopOnClose: true
+					});
+				}
+			} else {
+				addAlert(t("alert.runFailed", {title: res.target ?? entry.name}), "error");
+			}
+			if (entry.openLog && res.err !== undefined) {
+				setPopupInfo({
+					title: res.target ?? entry.name,
+					msg: res.err,
+					raw: true
+				});
+			}
+		}).catch(() => {
+			addAlert(t("alert.runFailed", {title: entry.name}), "error");
+		});
+	}, [addAlert, t]);
 
 	const saveFileInTab = useCallback((file: EditingFile, preview: boolean) => {
 		return new Promise<EditingFile[]>((resolve, reject) => {
@@ -3714,9 +3792,28 @@ export default function PersistentDrawerLeft() {
 										<BsSearch />
 									</IconButton>
 								</Tooltip>
+								<Tooltip title={t("menu.tools")}>
+									<IconButton
+										size="small"
+										color="inherit"
+										disableRipple
+										aria-pressed={leftDockTab === "tools"}
+										onClick={() => {
+											setLeftDockTab("tools");
+											loadEntries();
+										}}
+										sx={{
+											backgroundColor: leftDockTab === "tools" ? Color.Theme + "11" : "transparent",
+											border: `1px solid ${leftDockTab === "tools" ? Color.Theme + "55" : Color.Line}`,
+											borderRadius: 1.5,
+										}}
+									>
+										<CodeIcon fontSize="small"/>
+									</IconButton>
+								</Tooltip>
 							</Stack>
 						</div>
-						<div style={{flex: 1, minHeight: 0, padding: 0}} hidden={leftDockTab === "search"}>
+						<div style={{flex: 1, minHeight: 0, padding: 0}} hidden={leftDockTab !== "explorer"}>
 							<FileTree
 								selectedKeys={selectedKeys}
 								expandedKeys={expandedKeys}
@@ -3727,12 +3824,45 @@ export default function PersistentDrawerLeft() {
 								onDrop={onDrop}
 							/>
 						</div>
-						<div style={{flex: 1, minHeight: 0, padding: 0}} hidden={leftDockTab === "explorer"}>
+						<div style={{flex: 1, minHeight: 0, padding: 0}} hidden={leftDockTab !== "search"}>
 							<FileSearchPanel
 								open={leftDockTab === "search"}
 								searchPath={writablePath}
 								onOpenFile={onSearchOpenFile}
 							/>
+						</div>
+						<div style={{flex: 1, minHeight: 0, padding: 12, overflow: 'auto'}} hidden={leftDockTab !== "tools"}>
+							<Stack direction="row" alignItems="center" justifyContent="space-between" sx={{mb: 1}}>
+								<Typography variant="subtitle2" sx={{color: Color.Primary}}>
+									{t("menu.tools")}
+								</Typography>
+								<Button size="small" onClick={() => loadEntries()}>
+									{t("menu.reload")}
+								</Button>
+							</Stack>
+							<Stack spacing={1}>
+								{toolEntries.length === 0 ? (
+									<Typography variant="body2" sx={{opacity: 0.7}}>
+										{t("menu.noTools")}
+									</Typography>
+								) : toolEntries.map((entry) => (
+									<Button
+										key={`${entry.file}-${entry.name}`}
+										variant="outlined"
+										size="small"
+										fullWidth
+										onClick={() => onLaunchEntry(entry)}
+										sx={{
+											justifyContent: "flex-start",
+											textTransform: "none",
+											borderColor: Color.Line,
+											color: Color.Primary,
+										}}
+									>
+										{entry.name}
+									</Button>
+								))}
+							</Stack>
 						</div>
 					</div>
 					<div
