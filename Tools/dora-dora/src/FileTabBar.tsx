@@ -161,27 +161,60 @@ export default memo(function FileTabBar(props: FileTabBarProps) {
 		onMenuClick(event);
 	};
 
+	const canSaveCurrent = index !== null && items[index] !== undefined;
+	const canSaveAny = items.length > 0;
+
 	return (
-		<Box width={'100%'}>
-			<StyledTabs
-				value={value}
-				scrollButtons={items.length > 0}
-				onChange={handleChange}
-				aria-label="styled tabs"
-			>
-				{
-					items.map((item, index) =>
-						<StyledTab
-							onContextMenu={onContextMenu}
-							onTabClose={onTabClose}
-							key={item.key}
-							tooltip={item.key}
-							label={(index < 9 ? index + 1 + '.' : '') + (item.contentModified !== null ? '*' + item.title : item.title)}
-							status={item.status}
-						/>
-					)
-				}
-			</StyledTabs>
+		<Box width={'100%'} display="flex" alignItems="center">
+			<Box flex={1} minWidth={0}>
+				<StyledTabs
+					value={value}
+					scrollButtons={items.length > 0}
+					onChange={handleChange}
+					aria-label="styled tabs"
+				>
+					{
+						items.map((item, index) =>
+							<StyledTab
+								onContextMenu={onContextMenu}
+								onTabClose={onTabClose}
+								key={item.key}
+								tooltip={item.key}
+								label={(index < 9 ? index + 1 + '.' : '') + (item.contentModified !== null ? '*' + item.title : item.title)}
+								status={item.status}
+							/>
+						)
+					}
+				</StyledTabs>
+			</Box>
+			<Box display="flex" alignItems="center" sx={{flexShrink: 0, px: 0.5}}>
+				<Tooltip arrow title={`${t("menu.save")} Mod+S`}>
+					<span>
+						<IconButton
+							size="small"
+							color="secondary"
+							disabled={!canSaveCurrent}
+							onClick={() => onMenuClick("Save")}
+							sx={{opacity: canSaveCurrent ? 0.78 : 0.25}}
+						>
+							<AiOutlineSave/>
+						</IconButton>
+					</span>
+				</Tooltip>
+				<Tooltip arrow title={`${t("menu.saveAll")} Mod+Shift+S`}>
+					<span>
+						<IconButton
+							size="small"
+							color="secondary"
+							disabled={!canSaveAny}
+							onClick={() => onMenuClick("SaveAll")}
+							sx={{opacity: canSaveAny ? 0.78 : 0.25}}
+						>
+							<AiFillSave/>
+						</IconButton>
+					</span>
+				</Tooltip>
+			</Box>
 			<StyledMenu
 				id="dora-menu"
 				anchorEl={anchorEl}
@@ -240,4 +273,3 @@ export default memo(function FileTabBar(props: FileTabBarProps) {
 				item.status === nextItem.status;
 		});
 });
-
