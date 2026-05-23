@@ -56,7 +56,8 @@
 		"generate-imgui-types": "node scripts/generate-imgui-types.mjs",
 		"preview": "vite preview",
 		"lint": "eslint src",
-		"postinstall": "node scripts/copy-typescript.js"
+		"postinstall": "node scripts/copy-typescript.js",
+		"google:vertex-proxy": "node scripts/google-vertex-proxy.mjs"
 	},
 	"browserslist": {
 		"production": [
